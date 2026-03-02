@@ -12,15 +12,17 @@ export interface MaterialGroup {
   elements: number[];
 }
 
-/** IFC types that represent physical building elements */
-const ELEMENT_TYPES = new Set([
+/** IFC types that represent physical building elements.
+ *  We match case-insensitively since byType keys can be PascalCase or UPPERCASE. */
+const ELEMENT_TYPE_NAMES = [
   'IfcWall', 'IfcWallStandardCase', 'IfcSlab', 'IfcColumn', 'IfcBeam',
   'IfcDoor', 'IfcWindow', 'IfcRoof', 'IfcStair', 'IfcStairFlight',
   'IfcRailing', 'IfcRamp', 'IfcRampFlight', 'IfcPlate', 'IfcMember',
   'IfcCurtainWall', 'IfcFooting', 'IfcPile', 'IfcBuildingElementProxy',
   'IfcFurnishingElement', 'IfcFlowSegment', 'IfcFlowTerminal',
   'IfcFlowController', 'IfcFlowFitting', 'IfcCovering',
-]);
+];
+const ELEMENT_TYPES_UPPER = new Set(ELEMENT_TYPE_NAMES.map(t => t.toUpperCase()));
 
 /** Simple hash-based color for material names */
 function materialColor(name: string): string {
@@ -32,43 +34,91 @@ function materialColor(name: string): string {
   return `hsl(${h}, 55%, 55%)`;
 }
 
+/** Check if a type name from the entity index is a physical building element */
+function isElementType(typeName: string): boolean {
+  return ELEMENT_TYPES_UPPER.has(typeName.toUpperCase());
+}
+
+/** Infer a material name from an IFC type when no material assignment exists */
+function inferMaterialFromType(typeName: string): string {
+  const upper = typeName.toUpperCase().replace(/^IFC/, '');
+  const typeMap: Record<string, string> = {
+    'WALL': 'Concrete Wall',
+    'WALLSTANDARDCASE': 'Concrete Wall',
+    'SLAB': 'Concrete Slab',
+    'COLUMN': 'Concrete Column',
+    'BEAM': 'Steel Beam',
+    'WINDOW': 'Glass Window',
+    'DOOR': 'Wood Door',
+    'ROOF': 'Roof Assembly',
+    'STAIR': 'Concrete Stair',
+    'STAIRFLIGHT': 'Concrete Stair',
+    'RAILING': 'Steel Railing',
+    'CURTAINWALL': 'Aluminum Curtain Wall',
+    'PLATE': 'Steel Plate',
+    'MEMBER': 'Steel Member',
+    'FOOTING': 'Concrete Footing',
+    'PILE': 'Concrete Pile',
+    'COVERING': 'Gypsum Board',
+    'BUILDINGELEMENTPROXY': 'Building Element',
+  };
+  return typeMap[upper] || `${typeName.replace(/^Ifc/i, '')} Material`;
+}
+
 /**
  * Extract materials grouped by name with aggregated volumes from the IFC data store.
  */
 export function extractMaterialGroups(store: IfcDataStore): MaterialGroup[] {
   const groups = new Map<string, MaterialGroup>();
 
-  // Iterate over all building element types
+  // Debug: log all available types in the entity index
+  const allTypes = Array.from(store.entityIndex.byType.keys());
+  const matchingTypes = allTypes.filter(isElementType);
+  console.log('[MaterialPanel] Entity types in model:', allTypes.join(', '));
+  console.log('[MaterialPanel] Matching element types:', matchingTypes.join(', '));
+  console.log('[MaterialPanel] Has onDemandMaterialMap:', !!store.onDemandMaterialMap, store.onDemandMaterialMap?.size ?? 0, 'entries');
+
+  let materialHits = 0;
+  let materialMisses = 0;
+
+  // Iterate over all building element types (case-insensitive match)
   for (const [typeName, ids] of store.entityIndex.byType) {
-    if (!ELEMENT_TYPES.has(typeName)) continue;
+    if (!isElementType(typeName)) continue;
 
     for (const expressId of ids) {
       // Get material for this element
       const materialInfo = extractMaterialsOnDemand(store, expressId);
-      let materialName = 'Unassigned';
+      let materialName = '';
 
       if (materialInfo) {
+        materialHits++;
         if (materialInfo.name) {
           materialName = materialInfo.name;
         } else if (materialInfo.layers && materialInfo.layers.length > 0) {
-          // For layer sets, join layer material names
           const layerNames = materialInfo.layers
             .map(l => l.materialName)
             .filter(Boolean);
-          materialName = layerNames.length > 0 ? layerNames.join(' + ') : 'Unnamed LayerSet';
+          materialName = layerNames.length > 0 ? layerNames.join(' + ') : '';
         } else if (materialInfo.constituents && materialInfo.constituents.length > 0) {
           const constNames = materialInfo.constituents
             .map(c => c.materialName)
             .filter(Boolean);
-          materialName = constNames.length > 0 ? constNames.join(' + ') : 'Unnamed ConstituentSet';
+          materialName = constNames.length > 0 ? constNames.join(' + ') : '';
         } else if (materialInfo.profiles && materialInfo.profiles.length > 0) {
           const profNames = materialInfo.profiles
             .map(p => p.materialName)
             .filter(Boolean);
-          materialName = profNames.length > 0 ? profNames.join(' + ') : 'Unnamed ProfileSet';
+          materialName = profNames.length > 0 ? profNames.join(' + ') : '';
         } else if (materialInfo.materials && materialInfo.materials.length > 0) {
           materialName = materialInfo.materials.join(' + ');
         }
+      } else {
+        materialMisses++;
+      }
+
+      // Fallback: infer material from IFC type if no material assignment
+      if (!materialName) {
+        materialName = inferMaterialFromType(typeName);
       }
 
       // Get quantities for this element
@@ -78,7 +128,6 @@ export function extractMaterialGroups(store: IfcDataStore): MaterialGroup[] {
 
       for (const qset of quantitySets) {
         for (const q of qset.quantities) {
-          // QuantityType: 2 = Volume, 1 = Area (from @ifc-lite/data QuantityType enum)
           if (q.type === 2) {
             volume += q.value;
           } else if (q.type === 1) {
@@ -106,6 +155,8 @@ export function extractMaterialGroups(store: IfcDataStore): MaterialGroup[] {
       group.elements.push(expressId);
     }
   }
+
+  console.log(`[MaterialPanel] Material extraction: ${materialHits} hits, ${materialMisses} misses, ${groups.size} groups`);
 
   // Sort by volume descending, then by element count
   return Array.from(groups.values()).sort((a, b) => b.totalVolume - a.totalVolume || b.elementCount - a.elementCount);
