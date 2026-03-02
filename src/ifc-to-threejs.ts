@@ -30,7 +30,7 @@ export function meshDataToThree(mesh: MeshData): THREE.Mesh {
     color: new THREE.Color(r, g, b),
     transparent: a < 1,
     opacity: a,
-    side: a < 1 ? THREE.DoubleSide : THREE.FrontSide,
+    side: THREE.DoubleSide,
     depthWrite: a >= 1,
   });
 
