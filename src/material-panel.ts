@@ -2,6 +2,7 @@ import type { IfcDataStore } from '@ifc-lite/parser';
 import { extractMaterialsOnDemand, extractQuantitiesOnDemand } from '@ifc-lite/parser';
 import type { EPDMatch, LCAResult } from './lca/types.js';
 import { formatGWP } from './lca/calculator.js';
+import { hasOverride, getOverride, removeOverride, undo, redo, canUndo, canRedo } from './lca/overrides.js';
 
 export interface MaterialGroup {
   name: string;
@@ -171,6 +172,7 @@ export function renderMaterialPanel(groups: MaterialGroup[]): void {
 
 /**
  * Render the material groups with LCA matching results.
+ * Shows override indicators and undo/redo controls when materials have been switched.
  */
 export function renderMaterialPanelWithLCA(groups: MaterialGroup[], lcaResult: LCAResult | null): void {
   const listEl = document.getElementById('material-list')!;
@@ -190,12 +192,29 @@ export function renderMaterialPanelWithLCA(groups: MaterialGroup[], lcaResult: L
     for (const m of lcaResult.matches) matchMap.set(m.materialName, m);
   }
 
-  // Summary line
+  // Count overrides
+  const overrideCount = groups.filter(g => hasOverride(g.name)).length;
+
+  // Summary line with undo/redo controls
   if (lcaResult) {
-    summaryEl.innerHTML = `${groups.length} materials | ${totalElements} elements | <strong>Total GWP: ${formatGWP(lcaResult.totalGWP)} CO₂e</strong>`;
+    let summaryHtml = `${groups.length} materials | ${totalElements} elements | <strong>Total GWP: ${formatGWP(lcaResult.totalGWP)} CO\u2082e</strong>`;
+    if (overrideCount > 0) {
+      summaryHtml += ` <span class="override-count">${overrideCount} switched</span>`;
+    }
+    if (canUndo() || canRedo()) {
+      summaryHtml += `<span class="undo-redo-controls">`;
+      summaryHtml += `<button class="undo-btn" ${canUndo() ? '' : 'disabled'} title="Undo">\u21A9</button>`;
+      summaryHtml += `<button class="redo-btn" ${canRedo() ? '' : 'disabled'} title="Redo">\u21AA</button>`;
+      summaryHtml += `</span>`;
+    }
+    summaryEl.innerHTML = summaryHtml;
   } else {
     summaryEl.textContent = `${groups.length} materials | ${totalElements} elements | ${formatVolume(totalVolume)} total volume`;
   }
+
+  // Attach undo/redo handlers
+  summaryEl.querySelector('.undo-btn')?.addEventListener('click', () => undo());
+  summaryEl.querySelector('.redo-btn')?.addEventListener('click', () => redo());
 
   // Table header
   let html = `<table>
@@ -203,16 +222,16 @@ export function renderMaterialPanelWithLCA(groups: MaterialGroup[], lcaResult: L
       <tr>
         <th>Material</th>
         <th>Elements</th>
-        <th>Volume (m³)</th>`;
+        <th>Volume (m\u00B3)</th>`;
 
   if (lcaResult) {
     html += `
         <th>Matched EPD</th>
         <th>Conf.</th>
-        <th>GWP (CO₂e)</th>`;
+        <th>GWP (CO\u2082e)</th>`;
   } else {
     html += `
-        <th>Area (m²)</th>`;
+        <th>Area (m\u00B2)</th>`;
   }
 
   html += `
@@ -222,8 +241,10 @@ export function renderMaterialPanelWithLCA(groups: MaterialGroup[], lcaResult: L
 
   for (const group of groups) {
     const match = matchMap.get(group.name);
+    const override = getOverride(group.name);
+    const rowClass = override ? ' class="row-overridden"' : '';
 
-    html += `<tr>
+    html += `<tr${rowClass}>
       <td><span class="color-swatch" style="background:${group.color}"></span><span class="material-name">${escapeHtml(group.name)}</span></td>
       <td>${group.elementCount}</td>
       <td>${formatVolume(group.totalVolume)}</td>`;
@@ -231,18 +252,30 @@ export function renderMaterialPanelWithLCA(groups: MaterialGroup[], lcaResult: L
     if (lcaResult) {
       if (match) {
         const confClass = `conf-${match.confidence}`;
-        const altText = match.alternatives.length > 0
-          ? ` (alt: ${match.alternatives.map(a => a.name).join(', ')})`
-          : '';
-        html += `
+
+        if (override) {
+          // Overridden row: show new EPD with override indicator + revert button
+          html += `
+      <td>
+        <span class="epd-name epd-overridden" title="${escapeHtml(override.reason)}">${escapeHtml(match.epd.name)}</span>
+        <button class="revert-btn" data-material="${escapeHtml(group.name)}" title="Revert to original">\u2715</button>
+      </td>
+      <td><span class="conf-badge conf-override">\u2194</span></td>
+      <td class="gwp-cell ${match.gwpTotal < 0 ? 'gwp-negative' : ''}">${formatGWP(match.gwpTotal)}</td>`;
+        } else {
+          const altText = match.alternatives.length > 0
+            ? ` (alt: ${match.alternatives.map(a => a.name).join(', ')})`
+            : '';
+          html += `
       <td><span class="epd-name" title="${escapeHtml(match.reason + altText)}">${escapeHtml(match.epd.name)}</span></td>
       <td><span class="conf-badge ${confClass}">${match.confidence}</span></td>
       <td class="gwp-cell ${match.gwpTotal < 0 ? 'gwp-negative' : ''}">${formatGWP(match.gwpTotal)}</td>`;
+        }
       } else {
         html += `
-      <td class="unmatched">—</td>
-      <td>—</td>
-      <td>—</td>`;
+      <td class="unmatched">\u2014</td>
+      <td>\u2014</td>
+      <td>\u2014</td>`;
       }
     } else {
       html += `
@@ -255,11 +288,20 @@ export function renderMaterialPanelWithLCA(groups: MaterialGroup[], lcaResult: L
   // Warnings row
   if (lcaResult && lcaResult.warnings.length > 0) {
     const colspan = 6;
-    html += `<tr class="warning-row"><td colspan="${colspan}">⚠ ${lcaResult.warnings.map(escapeHtml).join(' | ')}</td></tr>`;
+    html += `<tr class="warning-row"><td colspan="${colspan}">\u26A0 ${lcaResult.warnings.map(escapeHtml).join(' | ')}</td></tr>`;
   }
 
   html += `</tbody></table>`;
   listEl.innerHTML = html;
+
+  // Attach revert button handlers via event delegation
+  listEl.querySelectorAll('.revert-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const materialName = (btn as HTMLElement).dataset.material!;
+      removeOverride(materialName);
+    });
+  });
 }
 
 function formatVolume(v: number): string {

@@ -157,6 +157,56 @@
     .unmatched { color: #666; font-style: italic; }
     .warning-row td { font-size: 0.75rem; color: #e9c46a; background: rgba(233,196,106,0.05); padding: 0.3rem 0.75rem; }
 
+    /* ── Override / material switching styles ────────────── */
+    .row-overridden { background: rgba(83, 52, 131, 0.12); border-left: 3px solid #9b59b6; }
+    .row-overridden:hover { background: rgba(83, 52, 131, 0.22); }
+    .epd-overridden { color: #c39bd3; font-weight: 500; }
+    .conf-override { background: #3b2060; color: #c39bd3; letter-spacing: 0; }
+    .revert-btn {
+      background: none;
+      border: 1px solid rgba(255,255,255,0.15);
+      color: #888;
+      border-radius: 3px;
+      font-size: 0.65rem;
+      cursor: pointer;
+      padding: 0.05rem 0.3rem;
+      margin-left: 0.4rem;
+      vertical-align: middle;
+      transition: all 0.15s;
+    }
+    .revert-btn:hover { color: #e76f6f; border-color: #e76f6f; background: rgba(231,111,111,0.1); }
+    .override-count {
+      display: inline-block;
+      background: #3b2060;
+      color: #c39bd3;
+      padding: 0.1rem 0.4rem;
+      border-radius: 3px;
+      font-size: 0.7rem;
+      margin-left: 0.3rem;
+    }
+    .undo-redo-controls { margin-left: 0.4rem; }
+    .undo-redo-controls button {
+      background: #1a2540;
+      border: 1px solid #333;
+      color: #a0b0d0;
+      border-radius: 3px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      padding: 0.1rem 0.35rem;
+      margin-left: 0.15rem;
+      transition: all 0.15s;
+    }
+    .undo-redo-controls button:hover:not(:disabled) { background: #233060; border-color: #533483; color: #e0e0e0; }
+    .undo-redo-controls button:disabled { opacity: 0.3; cursor: not-allowed; }
+    .switch-applied-badge {
+      font-size: 0.7rem;
+      color: #52b788;
+      background: rgba(82, 183, 136, 0.1);
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      margin-top: 0.3rem;
+    }
+
     /* ── Chat panel (right side) ───────────────────────── */
     #chat-panel {
       width: 340px;

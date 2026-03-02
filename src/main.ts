@@ -6,6 +6,9 @@ import { meshDataToThree, shouldHideMesh } from './ifc-to-threejs.js';
 import { extractMaterialGroups, renderMaterialPanel, renderMaterialPanelWithLCA } from './material-panel.js';
 import { initChatPanel, updateChatContext } from './chat/chat-panel.js';
 import { autoMatch } from './chat/llm-client.js';
+import { onOverridesChanged, applyOverridesToResult } from './lca/overrides.js';
+import type { LCAResult } from './lca/types.js';
+import type { MaterialGroup } from './material-panel.js';
 
 // DOM elements
 const canvas = document.getElementById('viewer') as HTMLCanvasElement;
@@ -35,6 +38,32 @@ scene.add(dirLight);
 // IFC-Lite processors
 const geometry = new GeometryProcessor();
 const parser = new IfcParser();
+
+// ── State for override reactivity ────────────────────────────────────
+let currentGroups: MaterialGroup[] = [];
+let baseLcaResult: LCAResult | null = null;
+
+// When overrides change, recompute and re-render
+onOverridesChanged(() => {
+  if (!baseLcaResult || currentGroups.length === 0) return;
+  const updated = applyOverridesToResult(baseLcaResult, currentGroups);
+  renderMaterialPanelWithLCA(currentGroups, updated);
+  updateChatContext(currentGroups, updated.matches);
+  updateStatusGWP(updated);
+});
+
+function updateStatusGWP(result: LCAResult): void {
+  const gwpStr = Math.abs(result.totalGWP) >= 1000
+    ? (result.totalGWP / 1000).toFixed(1) + ' t'
+    : result.totalGWP.toFixed(0) + ' kg';
+  const current = status.textContent || '';
+  // Update just the GWP portion if status contains pipe separators
+  const parts = current.split('|');
+  if (parts.length >= 3) {
+    parts[parts.length - 1] = ` GWP: ${gwpStr} CO\u2082e`;
+    status.textContent = parts.join('|');
+  }
+}
 
 // ── Initialize chat panel ──────────────────────────────────────────────
 initChatPanel();
@@ -142,7 +171,7 @@ fileInput.addEventListener('change', async () => {
         }
         if (event.type === 'complete') {
           fitCamera();
-          status.textContent = `${file.name} — ${event.totalMeshes} meshes`;
+          status.textContent = `${file.name} \u2014 ${event.totalMeshes} meshes`;
         }
       }
     })();
@@ -160,19 +189,21 @@ fileInput.addEventListener('change', async () => {
     // Extract material groups and render panel (basic view first)
     status.textContent = `Extracting materials...`;
     const groups = extractMaterialGroups(store);
+    currentGroups = groups;
     renderMaterialPanel(groups);
 
-    status.textContent = `${file.name} — ${meshCount} meshes | ${groups.length} materials — matching EPDs...`;
+    status.textContent = `${file.name} \u2014 ${meshCount} meshes | ${groups.length} materials \u2014 matching EPDs...`;
 
     // Run LCA auto-matching (keyword fallback if no API key)
     const lcaResult = await autoMatch(groups);
+    baseLcaResult = lcaResult;
     renderMaterialPanelWithLCA(groups, lcaResult);
     updateChatContext(groups, lcaResult.matches);
 
     const gwpStr = Math.abs(lcaResult.totalGWP) >= 1000
       ? (lcaResult.totalGWP / 1000).toFixed(1) + ' t'
       : lcaResult.totalGWP.toFixed(0) + ' kg';
-    status.textContent = `${file.name} — ${meshCount} meshes | ${groups.length} materials | GWP: ${gwpStr} CO₂e`;
+    status.textContent = `${file.name} \u2014 ${meshCount} meshes | ${groups.length} materials | GWP: ${gwpStr} CO\u2082e`;
   } catch (err: any) {
     status.textContent = 'Error: ' + err.message;
     console.error(err);

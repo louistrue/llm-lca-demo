@@ -1,13 +1,15 @@
 /**
  * Chat panel UI component.
  * Renders a side panel with chat interface for LCA analysis.
+ * Parses MATERIAL_SWITCH blocks from LLM responses to apply overrides.
  */
 import type { MaterialGroup } from '../material-panel.js';
 import type { EPDMatch } from '../lca/types.js';
+import type { MaterialOverride } from '../lca/overrides.js';
+import { applyOverrides } from '../lca/overrides.js';
 import {
   sendChatMessage,
   hasApiKey,
-  getStoredApiKey,
   storeApiKey,
   getStoredProvider,
   storeProvider,
@@ -41,7 +43,6 @@ export function updateChatContext(groups: MaterialGroup[], matches: EPDMatch[]):
   currentGroups = groups;
   currentMatches = matches;
 
-  // Enable chat if we have materials
   const input = document.getElementById('chat-input') as HTMLTextAreaElement;
   const sendBtn = document.getElementById('chat-send') as HTMLButtonElement;
   if (input && sendBtn) {
@@ -53,7 +54,6 @@ export function updateChatContext(groups: MaterialGroup[], matches: EPDMatch[]):
     }
   }
 
-  // Show suggested prompts if no messages yet
   if (chatHistory.length === 0 && groups.length > 0) {
     showSuggestedPrompts();
   }
@@ -64,7 +64,7 @@ function buildChatHTML(): string {
     <div class="chat-header">
       <div class="chat-header-row">
         <h2>LCA Chat</h2>
-        <button id="chat-settings-toggle" title="API Settings">⚙</button>
+        <button id="chat-settings-toggle" title="API Settings">&#9881;</button>
       </div>
       <div id="chat-settings" class="chat-settings hidden">
         <div class="settings-row">
@@ -82,25 +82,23 @@ function buildChatHTML(): string {
     </div>
     <div id="chat-messages" class="chat-messages">
       <div class="chat-empty-state">
-        <div class="chat-empty-icon">💬</div>
+        <div class="chat-empty-icon">&#128172;</div>
         <p>Load an IFC file and run LCA matching to start chatting</p>
       </div>
     </div>
     <div id="chat-suggested" class="chat-suggested hidden"></div>
     <form id="chat-form" class="chat-input-area">
       <textarea id="chat-input" placeholder="Load a model first..." disabled rows="1"></textarea>
-      <button id="chat-send" type="submit" disabled>→</button>
+      <button id="chat-send" type="submit" disabled>&#8594;</button>
     </form>
   `;
 }
 
 function attachEventListeners(): void {
-  // Settings toggle
   document.getElementById('chat-settings-toggle')!.addEventListener('click', () => {
     document.getElementById('chat-settings')!.classList.toggle('hidden');
   });
 
-  // Save API key
   document.getElementById('chat-save-key')!.addEventListener('click', () => {
     const keyInput = document.getElementById('chat-api-key') as HTMLInputElement;
     const providerSelect = document.getElementById('chat-provider') as HTMLSelectElement;
@@ -110,13 +108,11 @@ function attachEventListeners(): void {
     updateApiKeyUI();
   });
 
-  // Form submit
   document.getElementById('chat-form')!.addEventListener('submit', (e) => {
     e.preventDefault();
     handleSend();
   });
 
-  // Enter to send (shift+enter for newline)
   document.getElementById('chat-input')!.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -124,7 +120,6 @@ function attachEventListeners(): void {
     }
   });
 
-  // Auto-resize textarea
   document.getElementById('chat-input')!.addEventListener('input', () => {
     const textarea = document.getElementById('chat-input') as HTMLTextAreaElement;
     textarea.style.height = 'auto';
@@ -140,10 +135,10 @@ function updateApiKeyUI(): void {
   if (hasApiKey()) {
     const provider = getStoredProvider();
     const label = provider === 'anthropic' ? 'Claude' : 'GPT-4o';
-    statusEl.textContent = `✓ ${label} API key configured`;
+    statusEl.textContent = `\u2713 ${label} API key configured`;
     statusEl.className = 'key-status key-status-ok';
   } else {
-    statusEl.textContent = 'No API key — using keyword matching';
+    statusEl.textContent = 'No API key \u2014 using keyword matching';
     statusEl.className = 'key-status key-status-warn';
   }
 }
@@ -151,10 +146,10 @@ function updateApiKeyUI(): void {
 function showSuggestedPrompts(): void {
   const container = document.getElementById('chat-suggested')!;
   const prompts = [
-    { icon: '📊', text: 'Which material has the highest impact?' },
-    { icon: '🌱', text: 'Suggest lower-carbon alternatives' },
-    { icon: '🔄', text: 'What if we switch steel to timber?' },
-    { icon: '⚖️', text: 'How confident are the matches?' },
+    { icon: '\u{1F4CA}', text: 'Which material has the highest impact?' },
+    { icon: '\u{1F331}', text: 'Suggest lower-carbon alternatives' },
+    { icon: '\u{1F504}', text: 'What if we switch steel to timber?' },
+    { icon: '\u2696\uFE0F', text: 'How confident are the matches?' },
   ];
 
   container.innerHTML = prompts.map(p =>
@@ -171,27 +166,76 @@ function showSuggestedPrompts(): void {
   });
 }
 
+// ─── MATERIAL_SWITCH parsing ─────────────────────────────────────────
+
+const SWITCH_REGEX = /```MATERIAL_SWITCH\s*\n([\s\S]*?)\n```/g;
+
+/**
+ * Extract MATERIAL_SWITCH blocks from the LLM response,
+ * apply them as overrides, and return the display text (blocks stripped).
+ */
+function processResponse(fullText: string): { displayText: string; switchCount: number } {
+  let switchCount = 0;
+  const allOverrides: MaterialOverride[] = [];
+
+  const displayText = fullText.replace(SWITCH_REGEX, (_match, jsonStr: string) => {
+    try {
+      const switches = JSON.parse(jsonStr.trim());
+      if (Array.isArray(switches)) {
+        for (const s of switches) {
+          if (s.materialName && s.newEpdId) {
+            allOverrides.push({
+              materialName: s.materialName,
+              originalEpdId: '', // filled by override system from current match
+              newEpdId: s.newEpdId,
+              volumeFactor: s.volumeFactor ?? 1.0,
+              reason: s.reason ?? 'LLM suggestion',
+            });
+            switchCount++;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to parse MATERIAL_SWITCH block:', e);
+    }
+    return ''; // strip the block from display
+  }).trim();
+
+  // Fill in originalEpdId from current matches
+  const matchMap = new Map(currentMatches.map(m => [m.materialName, m]));
+  for (const o of allOverrides) {
+    const match = matchMap.get(o.materialName);
+    if (match) o.originalEpdId = match.epd.id;
+  }
+
+  if (allOverrides.length > 0) {
+    applyOverrides(allOverrides);
+  }
+
+  return { displayText, switchCount };
+}
+
+// ─── Send / display ──────────────────────────────────────────────────
+
 async function handleSend(): Promise<void> {
   const input = document.getElementById('chat-input') as HTMLTextAreaElement;
   const text = input.value.trim();
   if (!text || isStreaming) return;
 
-  // Hide suggested prompts
   document.getElementById('chat-suggested')!.classList.add('hidden');
 
-  // Add user message
   chatHistory.push({ role: 'user', content: text });
   appendMessage('user', text);
   input.value = '';
   input.style.height = 'auto';
 
   if (!hasApiKey()) {
-    chatHistory.push({ role: 'assistant', content: 'Please configure an API key in the settings (⚙) to use the chat. Keyword matching is available for auto-match, but chat requires an LLM.' });
-    appendMessage('assistant', chatHistory[chatHistory.length - 1].content);
+    const msg = 'Configure an API key in settings (\u2699) to use chat.';
+    chatHistory.push({ role: 'assistant', content: msg });
+    appendMessage('assistant', msg);
     return;
   }
 
-  // Stream assistant response
   isStreaming = true;
   const msgEl = appendMessage('assistant', '');
   const contentEl = msgEl.querySelector('.msg-content')!;
@@ -201,14 +245,28 @@ async function handleSend(): Promise<void> {
     fullResponse = await sendChatMessage(
       currentGroups,
       currentMatches,
-      chatHistory.slice(0, -1), // exclude the user message we just added (it's passed separately)
+      chatHistory.slice(0, -1),
       text,
       (chunk) => {
-        fullResponse = fullResponse; // closure reference
         contentEl.textContent += chunk;
         scrollToBottom();
       },
     );
+
+    // Process response: extract MATERIAL_SWITCH blocks, apply overrides
+    const { displayText, switchCount } = processResponse(fullResponse);
+
+    // Update displayed message (strip MATERIAL_SWITCH blocks)
+    contentEl.textContent = displayText;
+
+    // Show a small badge if switches were applied
+    if (switchCount > 0) {
+      const badge = document.createElement('div');
+      badge.className = 'switch-applied-badge';
+      badge.textContent = `\u2713 ${switchCount} material${switchCount > 1 ? 's' : ''} updated in table`;
+      contentEl.parentElement!.appendChild(badge);
+    }
+
     chatHistory.push({ role: 'assistant', content: fullResponse });
   } catch (err: any) {
     const errMsg = `Error: ${err.message}`;
@@ -217,19 +275,19 @@ async function handleSend(): Promise<void> {
   }
 
   isStreaming = false;
+  scrollToBottom();
 }
 
 function appendMessage(role: 'user' | 'assistant', content: string): HTMLElement {
   const messagesEl = document.getElementById('chat-messages')!;
 
-  // Remove empty state if present
   const emptyState = messagesEl.querySelector('.chat-empty-state');
   if (emptyState) emptyState.remove();
 
   const msgEl = document.createElement('div');
   msgEl.className = `chat-msg chat-msg-${role}`;
 
-  const icon = role === 'user' ? '👤' : '🤖';
+  const icon = role === 'user' ? '\u{1F464}' : '\u{1F916}';
   msgEl.innerHTML = `
     <div class="msg-icon">${icon}</div>
     <div class="msg-content">${escapeHtml(content)}</div>

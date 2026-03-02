@@ -4,7 +4,6 @@
 import { epdCatalog } from '../data/epd-catalog.js';
 import type { MaterialGroup } from '../material-panel.js';
 import type { EPDMatch } from '../lca/types.js';
-import { computeQuantity, computeGWP } from '../lca/calculator.js';
 
 /**
  * Compact EPD catalog representation for the system prompt.
@@ -13,7 +12,7 @@ function catalogToText(): string {
   const lines = epdCatalog.map(e => {
     const unit = e.declaredUnit;
     const gwpStr = e.gwp < 0 ? `${e.gwp} (carbon-storing)` : `${e.gwp}`;
-    return `  - [${e.id}] ${e.name} | GWP: ${gwpStr} kg CO₂e/${unit} | density: ${e.density} kg/m³ | cat: ${e.category}`;
+    return `  [${e.id}] ${e.name} | ${gwpStr} kg CO₂e/${unit} | ${e.density} kg/m³ | ${e.category}`;
   });
   return lines.join('\n');
 }
@@ -35,19 +34,17 @@ function materialContextToText(
     const vol = g.totalVolume > 0 ? `vol: ${g.totalVolume.toFixed(3)} m³` : '';
     const area = g.totalArea > 0 ? `area: ${g.totalArea.toFixed(2)} m²` : '';
     const dims = [vol, area].filter(Boolean).join(', ');
-    const elems = `${g.elementCount} elements`;
+    const elems = `${g.elementCount} el`;
 
     if (match) {
-      return `  - "${g.name}" (${elems}, ${dims}) → matched to [${match.epd.id}] ${match.epd.name} (${match.confidence} confidence, ${match.reason}) → GWP: ${match.gwpTotal.toFixed(0)} kg CO₂e (${match.quantity.toFixed(2)} ${match.epd.declaredUnit})`;
+      return `  "${g.name}" (${elems}, ${dims}) → [${match.epd.id}] ${match.epd.name} | GWP: ${match.gwpTotal.toFixed(0)} kg CO₂e (${match.quantity.toFixed(2)} ${match.epd.declaredUnit}) | conf: ${match.confidence}`;
     }
-    return `  - "${g.name}" (${elems}, ${dims}) → NOT MATCHED`;
+    return `  "${g.name}" (${elems}, ${dims}) → UNMATCHED`;
   });
 
   const totalGWP = matches.reduce((sum, m) => sum + m.gwpTotal, 0);
   return [
-    `Total GWP: ${totalGWP.toFixed(0)} kg CO₂e`,
-    `Matched: ${matches.length}/${groups.length} materials`,
-    '',
+    `Total GWP: ${totalGWP.toFixed(0)} kg CO₂e | Matched: ${matches.length}/${groups.length}`,
     ...lines,
   ].join('\n');
 }
@@ -59,40 +56,37 @@ export function buildSystemPrompt(
   groups: MaterialGroup[],
   matches: EPDMatch[],
 ): string {
-  return `You are an expert Life Cycle Assessment (LCA) assistant for buildings. You help users understand embodied carbon by analyzing their IFC building model's materials matched against Environmental Product Declarations (EPDs) from the Oekobaudat database.
+  return `You are a concise LCA (Life Cycle Assessment) assistant for buildings. You analyze IFC building models matched against EPDs from Oekobaudat.
 
-## Your EPD Catalog (${epdCatalog.length} entries from Oekobaudat)
+## EPD Catalog (${epdCatalog.length} entries)
 ${catalogToText()}
 
-## Current Building Model Materials
+## Current Model
 ${materialContextToText(groups, matches)}
 
-## Key Rules
-- GWP = Global Warming Potential in kg CO₂-equivalent, production stage A1-A3
-- Negative GWP means the material stores carbon (wood products)
-- When quantities are in m³ and EPD unit is kg, convert via density: mass = volume × density
-- When quantities are in m³ and EPD unit is m², estimate area = volume / typical thickness
-- Always cite specific EPD IDs when recommending matches or alternatives
+## Volume Factors for Material Switching
+Steel beam → Glulam: 4×  |  Steel column → Timber: 5×
+Concrete wall → CLT: 0.8×  |  Concrete slab → CLT: 0.6×
+Concrete column → Steel: 0.15×  |  Same-category swap: 1× (drop-in)
 
-## Structural Equivalency Rules (for what-if material switching)
-When a user asks "what if we switch material X to Y", adjust quantities:
-- Steel beam → Timber (glulam) beam: multiply volume by ~4× (timber needs larger cross-sections for same structural capacity)
-- Steel column → Timber column: multiply volume by ~5×
-- Concrete wall → CLT wall: volume factor ~0.8× (CLT walls typically thinner)
-- Concrete slab → CLT slab: volume factor ~0.6× (CLT lighter, needs less depth but wider)
-- Concrete column → Steel column: volume factor ~0.15× (steel is much stronger per unit)
-- EPS insulation → Stone wool: similar volume (same thermal target, adjust for different lambda)
-- Primary aluminum → Recycled aluminum: same volume (drop-in replacement)
-- Standard concrete → Low-carbon concrete: same volume (drop-in replacement)
-ALWAYS mention these adjustments and that a structural engineer should verify actual sizing.
+## MATERIAL_SWITCH Action Format
+When a user asks to switch a material, you MUST include a MATERIAL_SWITCH block in your response.
+This block will be parsed by the app to update the table automatically. Format:
 
-## Response Style
-- Be concise but precise. Use numbers.
-- Format GWP values with units (kg CO₂e or t CO₂e for large values)
-- When showing comparisons, use a clear before/after format
-- If the user asks about a material switch, show: current GWP → new GWP → delta (savings or increase)
-- Proactively flag the biggest impact contributors
-- When confidence is low, suggest what additional info would help`;
+\`\`\`MATERIAL_SWITCH
+[{"materialName":"exact name","newEpdId":"epd-id","volumeFactor":1.0,"reason":"brief reason"}]
+\`\`\`
+
+Include one entry per material being switched. Use exact materialName from the model.
+The volumeFactor adjusts the original volume (1.0 = same size, 4.0 = 4× bigger, etc.).
+
+## Response Rules
+- Be SHORT. 2-4 sentences max for simple questions.
+- Use plain numbers, no LaTeX or formulas.
+- For material switches: state the switch, show before→after GWP, note the delta, add structural caveat in one line. The MATERIAL_SWITCH block handles the actual table update.
+- Format large values: use "t CO₂e" for values ≥ 1000 kg.
+- Never repeat the full material table — the user can see it.
+- When multiple switches are requested, include all in one MATERIAL_SWITCH block.`;
 }
 
 /**
@@ -106,27 +100,9 @@ export function buildAutoMatchPrompt(groups: MaterialGroup[]): string {
     return `  - "${g.name}" (${g.elementCount} elements, ${dims})`;
   }).join('\n');
 
-  return `Please match each of these building materials from the IFC model to the best EPD from the catalog. For each material, return:
-- The best matching EPD ID
-- Confidence level (high/medium/low)
-- A brief reason for the match
-- Up to 2 alternative EPD IDs that could also work
+  return `Match each material to the best EPD. Respond ONLY with JSON (no markdown fences, no text):
+{"matches":[{"materialName":"exact name","epdId":"id","confidence":"high|medium|low","reason":"brief","alternativeIds":["id1","id2"]}],"unmatchedMaterials":["names"],"warnings":["notes"]}
 
-Materials to match:
-${materialList}
-
-Respond ONLY with valid JSON in this exact format (no markdown, no explanation outside the JSON):
-{
-  "matches": [
-    {
-      "materialName": "exact material name from above",
-      "epdId": "epd-id from catalog",
-      "confidence": "high|medium|low",
-      "reason": "brief reason",
-      "alternativeIds": ["alt-id-1", "alt-id-2"]
-    }
-  ],
-  "unmatchedMaterials": ["names of materials you cannot confidently match"],
-  "warnings": ["any notes about quantity issues or assumptions"]
-}`;
+Materials:
+${materialList}`;
 }
