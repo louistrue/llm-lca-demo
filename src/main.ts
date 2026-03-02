@@ -29,11 +29,14 @@ camera.position.set(20, 15, 20);
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = false;
 
-// Lighting
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+// Lighting — hemisphere for sky/ground fill + directional key light
+scene.add(new THREE.HemisphereLight(0xddeeff, 0x0d0d1a, 0.8));
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
 dirLight.position.set(50, 80, 50);
 scene.add(dirLight);
+const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
+fillLight.position.set(-30, 20, -40);
+scene.add(fillLight);
 
 // IFC-Lite processors
 const geometry = new GeometryProcessor();
