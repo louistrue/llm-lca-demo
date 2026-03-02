@@ -17,11 +17,12 @@ const status = document.getElementById('status')!;
 
 // ── Three.js setup ──────────────────────────────────────────────────────
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1a1a2e);
+scene.background = new THREE.Color(0x0d1b2a);
 
 const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 10000);
 camera.position.set(20, 15, 20);
@@ -29,13 +30,13 @@ camera.position.set(20, 15, 20);
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = false;
 
-// Lighting — hemisphere for sky/ground fill + directional key light
-scene.add(new THREE.HemisphereLight(0xddeeff, 0x0d0d1a, 0.8));
-const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+// Lighting — matches ifc-lite reference viewer
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
 dirLight.position.set(50, 80, 50);
 scene.add(dirLight);
-const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
-fillLight.position.set(-30, 20, -40);
+const fillLight = new THREE.DirectionalLight(0xb0c4de, 0.3);
+fillLight.position.set(-30, 10, -20);
 scene.add(fillLight);
 
 // IFC-Lite processors

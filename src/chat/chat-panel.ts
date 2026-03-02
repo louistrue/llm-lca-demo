@@ -314,9 +314,9 @@ async function handleSend(): Promise<void> {
     // Update displayed message (strip MATERIAL_SWITCH blocks)
     contentEl.textContent = displayText;
 
-    // Show interactive confirm/reject cards for each proposed switch
+    // Show interactive confirm/reject cards below the message text
     if (proposals.length > 0) {
-      renderSwitchProposals(proposals, msgEl);
+      renderSwitchProposals(proposals, contentEl as HTMLElement);
     }
 
     chatHistory.push({ role: 'assistant', content: fullResponse });
