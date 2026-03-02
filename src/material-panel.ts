@@ -1,5 +1,7 @@
 import type { IfcDataStore } from '@ifc-lite/parser';
 import { extractMaterialsOnDemand, extractQuantitiesOnDemand } from '@ifc-lite/parser';
+import type { EPDMatch, LCAResult } from './lca/types.js';
+import { formatGWP } from './lca/calculator.js';
 
 export interface MaterialGroup {
   name: string;
@@ -110,9 +112,16 @@ export function extractMaterialGroups(store: IfcDataStore): MaterialGroup[] {
 }
 
 /**
- * Render the material groups into the panel.
+ * Render the material groups into the panel (basic view, no LCA).
  */
 export function renderMaterialPanel(groups: MaterialGroup[]): void {
+  renderMaterialPanelWithLCA(groups, null);
+}
+
+/**
+ * Render the material groups with LCA matching results.
+ */
+export function renderMaterialPanelWithLCA(groups: MaterialGroup[], lcaResult: LCAResult | null): void {
   const listEl = document.getElementById('material-list')!;
   const summaryEl = document.getElementById('panel-summary')!;
 
@@ -124,26 +133,78 @@ export function renderMaterialPanel(groups: MaterialGroup[]): void {
 
   const totalElements = groups.reduce((sum, g) => sum + g.elementCount, 0);
   const totalVolume = groups.reduce((sum, g) => sum + g.totalVolume, 0);
-  summaryEl.textContent = `${groups.length} materials | ${totalElements} elements | ${formatVolume(totalVolume)} total volume`;
 
+  const matchMap = new Map<string, EPDMatch>();
+  if (lcaResult) {
+    for (const m of lcaResult.matches) matchMap.set(m.materialName, m);
+  }
+
+  // Summary line
+  if (lcaResult) {
+    summaryEl.innerHTML = `${groups.length} materials | ${totalElements} elements | <strong>Total GWP: ${formatGWP(lcaResult.totalGWP)} CO₂e</strong>`;
+  } else {
+    summaryEl.textContent = `${groups.length} materials | ${totalElements} elements | ${formatVolume(totalVolume)} total volume`;
+  }
+
+  // Table header
   let html = `<table>
     <thead>
       <tr>
         <th>Material</th>
         <th>Elements</th>
-        <th>Volume (m\u00B3)</th>
-        <th>Area (m\u00B2)</th>
+        <th>Volume (m³)</th>`;
+
+  if (lcaResult) {
+    html += `
+        <th>Matched EPD</th>
+        <th>Conf.</th>
+        <th>GWP (CO₂e)</th>`;
+  } else {
+    html += `
+        <th>Area (m²)</th>`;
+  }
+
+  html += `
       </tr>
     </thead>
     <tbody>`;
 
   for (const group of groups) {
+    const match = matchMap.get(group.name);
+
     html += `<tr>
       <td><span class="color-swatch" style="background:${group.color}"></span><span class="material-name">${escapeHtml(group.name)}</span></td>
       <td>${group.elementCount}</td>
-      <td>${formatVolume(group.totalVolume)}</td>
-      <td>${formatArea(group.totalArea)}</td>
-    </tr>`;
+      <td>${formatVolume(group.totalVolume)}</td>`;
+
+    if (lcaResult) {
+      if (match) {
+        const confClass = `conf-${match.confidence}`;
+        const altText = match.alternatives.length > 0
+          ? ` (alt: ${match.alternatives.map(a => a.name).join(', ')})`
+          : '';
+        html += `
+      <td><span class="epd-name" title="${escapeHtml(match.reason + altText)}">${escapeHtml(match.epd.name)}</span></td>
+      <td><span class="conf-badge ${confClass}">${match.confidence}</span></td>
+      <td class="gwp-cell ${match.gwpTotal < 0 ? 'gwp-negative' : ''}">${formatGWP(match.gwpTotal)}</td>`;
+      } else {
+        html += `
+      <td class="unmatched">—</td>
+      <td>—</td>
+      <td>—</td>`;
+      }
+    } else {
+      html += `
+      <td>${formatArea(group.totalArea)}</td>`;
+    }
+
+    html += `</tr>`;
+  }
+
+  // Warnings row
+  if (lcaResult && lcaResult.warnings.length > 0) {
+    const colspan = 6;
+    html += `<tr class="warning-row"><td colspan="${colspan}">⚠ ${lcaResult.warnings.map(escapeHtml).join(' | ')}</td></tr>`;
   }
 
   html += `</tbody></table>`;

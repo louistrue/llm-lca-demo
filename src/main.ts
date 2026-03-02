@@ -3,7 +3,9 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GeometryProcessor } from '@ifc-lite/geometry';
 import { IfcParser } from '@ifc-lite/parser';
 import { meshDataToThree } from './ifc-to-threejs.js';
-import { extractMaterialGroups, renderMaterialPanel } from './material-panel.js';
+import { extractMaterialGroups, renderMaterialPanel, renderMaterialPanelWithLCA } from './material-panel.js';
+import { initChatPanel, updateChatContext } from './chat/chat-panel.js';
+import { autoMatch } from './chat/llm-client.js';
 
 // DOM elements
 const canvas = document.getElementById('viewer') as HTMLCanvasElement;
@@ -33,6 +35,9 @@ scene.add(dirLight);
 // IFC-Lite processors
 const geometry = new GeometryProcessor();
 const parser = new IfcParser();
+
+// ── Initialize chat panel ──────────────────────────────────────────────
+initChatPanel();
 
 // ── Resize ──────────────────────────────────────────────────────────────
 function resize() {
@@ -151,12 +156,22 @@ fileInput.addEventListener('change', async () => {
     // Wait for both to complete
     const [, store] = await Promise.all([geometryPromise, dataPromise]);
 
-    // Extract material groups and render panel
+    // Extract material groups and render panel (basic view first)
     status.textContent = `Extracting materials...`;
     const groups = extractMaterialGroups(store);
     renderMaterialPanel(groups);
 
-    status.textContent = `${file.name} — ${meshCount} meshes | ${groups.length} materials`;
+    status.textContent = `${file.name} — ${meshCount} meshes | ${groups.length} materials — matching EPDs...`;
+
+    // Run LCA auto-matching (keyword fallback if no API key)
+    const lcaResult = await autoMatch(groups);
+    renderMaterialPanelWithLCA(groups, lcaResult);
+    updateChatContext(groups, lcaResult.matches);
+
+    const gwpStr = Math.abs(lcaResult.totalGWP) >= 1000
+      ? (lcaResult.totalGWP / 1000).toFixed(1) + ' t'
+      : lcaResult.totalGWP.toFixed(0) + ' kg';
+    status.textContent = `${file.name} — ${meshCount} meshes | ${groups.length} materials | GWP: ${gwpStr} CO₂e`;
   } catch (err: any) {
     status.textContent = 'Error: ' + err.message;
     console.error(err);
