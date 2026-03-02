@@ -1,12 +1,14 @@
 /**
  * Chat panel UI component.
  * Renders a side panel with chat interface for LCA analysis.
- * Parses MATERIAL_SWITCH blocks from LLM responses to apply overrides.
+ * Parses MATERIAL_SWITCH blocks from LLM responses and shows
+ * interactive confirm/reject cards for each proposed switch.
  */
 import type { MaterialGroup } from '../material-panel.js';
 import type { EPDMatch } from '../lca/types.js';
 import type { MaterialOverride } from '../lca/overrides.js';
-import { applyOverrides } from '../lca/overrides.js';
+import { applyOverride } from '../lca/overrides.js';
+import { getEPDById } from '../data/epd-catalog.js';
 import {
   sendChatMessage,
   hasApiKey,
@@ -170,13 +172,19 @@ function showSuggestedPrompts(): void {
 
 const SWITCH_REGEX = /```MATERIAL_SWITCH\s*\n([\s\S]*?)\n```/g;
 
+interface ProposedSwitch {
+  override: MaterialOverride;
+  newEpdName: string;
+  currentEpdName: string;
+}
+
 /**
- * Extract MATERIAL_SWITCH blocks from the LLM response,
- * apply them as overrides, and return the display text (blocks stripped).
+ * Extract MATERIAL_SWITCH blocks from the LLM response.
+ * Returns the display text (blocks stripped) and parsed proposals for user confirmation.
  */
-function processResponse(fullText: string): { displayText: string; switchCount: number } {
-  let switchCount = 0;
-  const allOverrides: MaterialOverride[] = [];
+function processResponse(fullText: string): { displayText: string; proposals: ProposedSwitch[] } {
+  const proposals: ProposedSwitch[] = [];
+  const matchMap = new Map(currentMatches.map(m => [m.materialName, m]));
 
   const displayText = fullText.replace(SWITCH_REGEX, (_match, jsonStr: string) => {
     try {
@@ -184,35 +192,82 @@ function processResponse(fullText: string): { displayText: string; switchCount: 
       if (Array.isArray(switches)) {
         for (const s of switches) {
           if (s.materialName && s.newEpdId) {
-            allOverrides.push({
-              materialName: s.materialName,
-              originalEpdId: '', // filled by override system from current match
-              newEpdId: s.newEpdId,
-              volumeFactor: s.volumeFactor ?? 1.0,
-              reason: s.reason ?? 'LLM suggestion',
+            const currentMatch = matchMap.get(s.materialName);
+            const newEpd = getEPDById(s.newEpdId);
+
+            if (!newEpd) {
+              console.warn(`[Chat] Unknown EPD id "${s.newEpdId}" for material "${s.materialName}"`);
+              continue;
+            }
+
+            proposals.push({
+              override: {
+                materialName: s.materialName,
+                originalEpdId: currentMatch?.epd.id ?? '',
+                newEpdId: s.newEpdId,
+                volumeFactor: s.volumeFactor ?? 1.0,
+                reason: s.reason ?? 'LLM suggestion',
+              },
+              newEpdName: newEpd.name,
+              currentEpdName: currentMatch?.epd.name ?? 'unknown',
             });
-            switchCount++;
           }
         }
       }
     } catch (e) {
-      console.warn('Failed to parse MATERIAL_SWITCH block:', e);
+      console.warn('[Chat] Failed to parse MATERIAL_SWITCH block:', e);
     }
     return ''; // strip the block from display
   }).trim();
 
-  // Fill in originalEpdId from current matches
-  const matchMap = new Map(currentMatches.map(m => [m.materialName, m]));
-  for (const o of allOverrides) {
-    const match = matchMap.get(o.materialName);
-    if (match) o.originalEpdId = match.epd.id;
+  console.log(`[Chat] Parsed ${proposals.length} material switch proposals`);
+  return { displayText, proposals };
+}
+
+/**
+ * Render interactive switch proposal cards with accept/reject buttons.
+ */
+function renderSwitchProposals(proposals: ProposedSwitch[], parentEl: HTMLElement): void {
+  if (proposals.length === 0) return;
+
+  const container = document.createElement('div');
+  container.className = 'switch-proposals';
+
+  for (const p of proposals) {
+    const card = document.createElement('div');
+    card.className = 'switch-card';
+    card.innerHTML = `
+      <div class="switch-card-info">
+        <span class="switch-material">${escapeHtml(p.override.materialName)}</span>
+        <span class="switch-arrow">${escapeHtml(p.currentEpdName)} \u2192 ${escapeHtml(p.newEpdName)}</span>
+        ${p.override.volumeFactor !== 1.0 ? `<span class="switch-factor">${p.override.volumeFactor}\u00D7 vol</span>` : ''}
+      </div>
+      <div class="switch-card-actions">
+        <button class="switch-accept" title="Apply this switch">\u2713</button>
+        <button class="switch-reject" title="Dismiss">\u2715</button>
+      </div>
+    `;
+
+    const acceptBtn = card.querySelector('.switch-accept')!;
+    const rejectBtn = card.querySelector('.switch-reject')!;
+
+    acceptBtn.addEventListener('click', () => {
+      console.log(`[Chat] User accepted switch: ${p.override.materialName} -> ${p.override.newEpdId}`);
+      applyOverride(p.override);
+      card.className = 'switch-card switch-card-accepted';
+      card.querySelector('.switch-card-actions')!.innerHTML = '<span class="switch-status-text">Applied</span>';
+    });
+
+    rejectBtn.addEventListener('click', () => {
+      console.log(`[Chat] User rejected switch: ${p.override.materialName}`);
+      card.className = 'switch-card switch-card-rejected';
+      card.querySelector('.switch-card-actions')!.innerHTML = '<span class="switch-status-text">Dismissed</span>';
+    });
+
+    container.appendChild(card);
   }
 
-  if (allOverrides.length > 0) {
-    applyOverrides(allOverrides);
-  }
-
-  return { displayText, switchCount };
+  parentEl.appendChild(container);
 }
 
 // ─── Send / display ──────────────────────────────────────────────────
@@ -253,18 +308,15 @@ async function handleSend(): Promise<void> {
       },
     );
 
-    // Process response: extract MATERIAL_SWITCH blocks, apply overrides
-    const { displayText, switchCount } = processResponse(fullResponse);
+    // Process response: extract MATERIAL_SWITCH blocks (don't auto-apply)
+    const { displayText, proposals } = processResponse(fullResponse);
 
     // Update displayed message (strip MATERIAL_SWITCH blocks)
     contentEl.textContent = displayText;
 
-    // Show a small badge if switches were applied
-    if (switchCount > 0) {
-      const badge = document.createElement('div');
-      badge.className = 'switch-applied-badge';
-      badge.textContent = `\u2713 ${switchCount} material${switchCount > 1 ? 's' : ''} updated in table`;
-      contentEl.parentElement!.appendChild(badge);
+    // Show interactive confirm/reject cards for each proposed switch
+    if (proposals.length > 0) {
+      renderSwitchProposals(proposals, msgEl);
     }
 
     chatHistory.push({ role: 'assistant', content: fullResponse });

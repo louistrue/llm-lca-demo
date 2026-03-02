@@ -48,8 +48,13 @@ let baseLcaResult: LCAResult | null = null;
 
 // When overrides change, recompute and re-render
 onOverridesChanged(() => {
-  if (!baseLcaResult || currentGroups.length === 0) return;
+  console.log(`[Main] Override change detected. baseLcaResult: ${!!baseLcaResult}, groups: ${currentGroups.length}`);
+  if (!baseLcaResult || currentGroups.length === 0) {
+    console.warn('[Main] Skipping re-render: no base result or no groups');
+    return;
+  }
   const updated = applyOverridesToResult(baseLcaResult, currentGroups);
+  console.log(`[Main] Re-rendering table with ${updated.matches.length} matches, total GWP: ${updated.totalGWP.toFixed(0)} kg`);
   renderMaterialPanelWithLCA(currentGroups, updated);
   updateChatContext(currentGroups, updated.matches);
   updateStatusGWP(updated);

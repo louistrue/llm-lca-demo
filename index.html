@@ -198,14 +198,50 @@
     }
     .undo-redo-controls button:hover:not(:disabled) { background: #233060; border-color: #533483; color: #e0e0e0; }
     .undo-redo-controls button:disabled { opacity: 0.3; cursor: not-allowed; }
-    .switch-applied-badge {
-      font-size: 0.7rem;
-      color: #52b788;
-      background: rgba(82, 183, 136, 0.1);
-      padding: 0.2rem 0.5rem;
-      border-radius: 4px;
-      margin-top: 0.3rem;
+    /* ── Chat switch proposal cards ──────────────────────── */
+    .switch-proposals { margin-top: 0.4rem; display: flex; flex-direction: column; gap: 0.3rem; }
+    .switch-card {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #1a2540;
+      border: 1px solid #333;
+      border-radius: 6px;
+      padding: 0.35rem 0.5rem;
+      font-size: 0.75rem;
+      transition: all 0.2s;
     }
+    .switch-card-info { display: flex; flex-direction: column; gap: 0.1rem; flex: 1; min-width: 0; }
+    .switch-material { color: #e0e0e0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .switch-arrow { color: #a0b0d0; font-size: 0.7rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .switch-factor { color: #e9c46a; font-size: 0.65rem; }
+    .switch-card-actions { display: flex; gap: 0.25rem; flex-shrink: 0; margin-left: 0.4rem; }
+    .switch-accept {
+      background: #1b4332;
+      border: 1px solid #52b788;
+      color: #52b788;
+      border-radius: 4px;
+      cursor: pointer;
+      padding: 0.15rem 0.4rem;
+      font-size: 0.75rem;
+      font-weight: bold;
+      transition: all 0.15s;
+    }
+    .switch-accept:hover { background: #2d6a4f; }
+    .switch-reject {
+      background: transparent;
+      border: 1px solid #555;
+      color: #888;
+      border-radius: 4px;
+      cursor: pointer;
+      padding: 0.15rem 0.4rem;
+      font-size: 0.75rem;
+      transition: all 0.15s;
+    }
+    .switch-reject:hover { border-color: #e76f6f; color: #e76f6f; }
+    .switch-card-accepted { border-color: #52b788; background: rgba(82, 183, 136, 0.08); opacity: 0.7; }
+    .switch-card-rejected { border-color: #555; opacity: 0.4; }
+    .switch-status-text { font-size: 0.7rem; color: #888; font-style: italic; }
 
     /* ── Chat panel (right side) ───────────────────────── */
     #chat-panel {
