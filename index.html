@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LCA Material Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #1a1a2e; color: #e0e0e0; overflow: hidden; }
+    #app { display: flex; flex-direction: column; height: 100vh; }
+
+    /* Header */
+    header {
+      padding: 0.6rem 1rem;
+      background: #16213e;
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+      border-bottom: 1px solid #0f3460;
+      z-index: 10;
+    }
+    header h1 { font-size: 0.95rem; font-weight: 600; white-space: nowrap; }
+    #file-input {
+      padding: 0.35rem 0.7rem;
+      background: #0f3460;
+      border: 1px solid #533483;
+      border-radius: 4px;
+      color: #fff;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+    #status { color: #888; font-size: 0.8rem; }
+
+    /* 3D Viewer */
+    #canvas-container { flex: 1; position: relative; min-height: 0; }
+    canvas { display: block; width: 100%; height: 100%; }
+
+    /* Resize handle */
+    #panel-resize {
+      height: 5px;
+      background: #0f3460;
+      cursor: ns-resize;
+      flex-shrink: 0;
+    }
+    #panel-resize:hover { background: #533483; }
+
+    /* Material Panel */
+    #material-panel {
+      height: 240px;
+      background: #16213e;
+      border-top: 1px solid #0f3460;
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    #panel-header {
+      padding: 0.5rem 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #121f38;
+      border-bottom: 1px solid #0f3460;
+    }
+    #panel-header h2 { font-size: 0.85rem; font-weight: 600; }
+    #panel-summary { font-size: 0.75rem; color: #888; }
+
+    /* Material table */
+    #material-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0;
+    }
+    #material-list::-webkit-scrollbar { width: 6px; }
+    #material-list::-webkit-scrollbar-track { background: #16213e; }
+    #material-list::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+    }
+    thead { position: sticky; top: 0; z-index: 1; }
+    thead th {
+      background: #1a2540;
+      padding: 0.45rem 0.75rem;
+      text-align: left;
+      font-weight: 500;
+      color: #aaa;
+      border-bottom: 1px solid #0f3460;
+      white-space: nowrap;
+    }
+    thead th:nth-child(2),
+    thead th:nth-child(3),
+    thead th:nth-child(4) { text-align: right; }
+    tbody tr { border-bottom: 1px solid rgba(255,255,255,0.04); }
+    tbody tr:hover { background: rgba(83, 52, 131, 0.15); }
+    tbody td {
+      padding: 0.4rem 0.75rem;
+      vertical-align: middle;
+    }
+    tbody td:nth-child(2),
+    tbody td:nth-child(3),
+    tbody td:nth-child(4) { text-align: right; font-variant-numeric: tabular-nums; }
+
+    .color-swatch {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border-radius: 2px;
+      margin-right: 8px;
+      vertical-align: middle;
+      border: 1px solid rgba(255,255,255,0.15);
+    }
+    .material-name { vertical-align: middle; }
+
+    .empty-state {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: #555;
+      font-size: 0.85rem;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>LCA Material Viewer</h1>
+      <input type="file" id="file-input" accept=".ifc" />
+      <span id="status">Load an IFC file to view materials</span>
+    </header>
+    <div id="canvas-container">
+      <canvas id="viewer"></canvas>
+    </div>
+    <div id="panel-resize"></div>
+    <div id="material-panel">
+      <div id="panel-header">
+        <h2>Materials for LCA</h2>
+        <span id="panel-summary"></span>
+      </div>
+      <div id="material-list">
+        <div class="empty-state">Load an IFC file to see materials and volumes</div>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
