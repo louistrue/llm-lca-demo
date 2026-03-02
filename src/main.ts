@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GeometryProcessor } from '@ifc-lite/geometry';
 import { IfcParser } from '@ifc-lite/parser';
-import { meshDataToThree } from './ifc-to-threejs.js';
+import { meshDataToThree, shouldHideMesh } from './ifc-to-threejs.js';
 import { extractMaterialGroups, renderMaterialPanel, renderMaterialPanelWithLCA } from './material-panel.js';
 import { initChatPanel, updateChatContext } from './chat/chat-panel.js';
 import { autoMatch } from './chat/llm-client.js';
@@ -86,7 +86,7 @@ function clearModel() {
   for (const obj of toRemove) {
     scene.remove(obj);
     obj.traverse((child) => {
-      if (child instanceof THREE.Mesh) {
+      if (child instanceof THREE.Mesh || child instanceof THREE.LineSegments) {
         child.geometry.dispose();
         if (Array.isArray(child.material)) {
           child.material.forEach((m) => m.dispose());
@@ -134,6 +134,7 @@ fileInput.addEventListener('change', async () => {
       for await (const event of geometry.processStreaming(buffer)) {
         if (event.type === 'batch') {
           for (const mesh of event.meshes) {
+            if (shouldHideMesh(mesh)) continue;
             scene.add(meshDataToThree(mesh));
           }
           meshCount += event.meshes.length;
