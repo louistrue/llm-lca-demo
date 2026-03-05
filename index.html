@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LCA Material Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #1a1a2e; color: #e0e0e0; overflow: hidden; }
+    #app { display: flex; flex-direction: column; height: 100vh; }
+
+    /* Header */
+    header {
+      padding: 0.6rem 1rem;
+      background: #16213e;
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+      border-bottom: 1px solid #0f3460;
+      z-index: 10;
+    }
+    header h1 { font-size: 0.95rem; font-weight: 600; white-space: nowrap; }
+    #file-input {
+      padding: 0.35rem 0.7rem;
+      background: #0f3460;
+      border: 1px solid #533483;
+      border-radius: 4px;
+      color: #fff;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+    #status { color: #888; font-size: 0.8rem; flex: 1; }
+
+    /* Main content: viewer + chat side by side */
+    #main-content {
+      flex: 1;
+      display: flex;
+      min-height: 0;
+    }
+
+    /* Left side: 3D viewer + material panel */
+    #left-pane {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    /* 3D Viewer */
+    #canvas-container { flex: 1; position: relative; min-height: 0; }
+    canvas { display: block; width: 100%; height: 100%; }
+
+    /* Resize handle */
+    #panel-resize {
+      height: 5px;
+      background: #0f3460;
+      cursor: ns-resize;
+      flex-shrink: 0;
+    }
+    #panel-resize:hover { background: #533483; }
+
+    /* Material Panel */
+    #material-panel {
+      height: 240px;
+      background: #16213e;
+      border-top: 1px solid #0f3460;
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    #panel-header {
+      padding: 0.5rem 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #121f38;
+      border-bottom: 1px solid #0f3460;
+    }
+    #panel-header h2 { font-size: 0.85rem; font-weight: 600; }
+    #panel-summary { font-size: 0.75rem; color: #888; }
+
+    /* Material table */
+    #material-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0;
+    }
+    #material-list::-webkit-scrollbar { width: 6px; }
+    #material-list::-webkit-scrollbar-track { background: #16213e; }
+    #material-list::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+    }
+    thead { position: sticky; top: 0; z-index: 1; }
+    thead th {
+      background: #1a2540;
+      padding: 0.45rem 0.75rem;
+      text-align: left;
+      font-weight: 500;
+      color: #aaa;
+      border-bottom: 1px solid #0f3460;
+      white-space: nowrap;
+    }
+    thead th:nth-child(2),
+    thead th:nth-child(3) { text-align: right; }
+    tbody tr { border-bottom: 1px solid rgba(255,255,255,0.04); }
+    tbody tr:hover { background: rgba(83, 52, 131, 0.15); }
+    tbody td {
+      padding: 0.4rem 0.75rem;
+      vertical-align: middle;
+    }
+    tbody td:nth-child(2),
+    tbody td:nth-child(3) { text-align: right; font-variant-numeric: tabular-nums; }
+
+    .color-swatch {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border-radius: 2px;
+      margin-right: 8px;
+      vertical-align: middle;
+      border: 1px solid rgba(255,255,255,0.15);
+    }
+    .material-name { vertical-align: middle; }
+
+    .empty-state {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: #555;
+      font-size: 0.85rem;
+    }
+
+    /* ── LCA-specific table styles ─────────────────────── */
+    .epd-name {
+      font-size: 0.75rem;
+      color: #a0b0d0;
+      cursor: help;
+    }
+    .conf-badge {
+      display: inline-block;
+      padding: 0.1rem 0.4rem;
+      border-radius: 3px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .conf-high { background: #1b4332; color: #52b788; }
+    .conf-medium { background: #3d3400; color: #e9c46a; }
+    .conf-low { background: #4a1520; color: #e76f6f; }
+    .gwp-cell { font-variant-numeric: tabular-nums; text-align: right !important; }
+    .gwp-negative { color: #52b788; }
+    .unmatched { color: #666; font-style: italic; }
+    .warning-row td { font-size: 0.75rem; color: #e9c46a; background: rgba(233,196,106,0.05); padding: 0.3rem 0.75rem; }
+
+    /* ── Override / material switching styles ────────────── */
+    .row-overridden { background: rgba(83, 52, 131, 0.12); border-left: 3px solid #9b59b6; }
+    .row-overridden:hover { background: rgba(83, 52, 131, 0.22); }
+    .epd-overridden { color: #c39bd3; font-weight: 500; }
+    .conf-override { background: #3b2060; color: #c39bd3; letter-spacing: 0; }
+    .revert-btn {
+      background: none;
+      border: 1px solid rgba(255,255,255,0.15);
+      color: #888;
+      border-radius: 3px;
+      font-size: 0.65rem;
+      cursor: pointer;
+      padding: 0.05rem 0.3rem;
+      margin-left: 0.4rem;
+      vertical-align: middle;
+      transition: all 0.15s;
+    }
+    .revert-btn:hover { color: #e76f6f; border-color: #e76f6f; background: rgba(231,111,111,0.1); }
+    .override-count {
+      display: inline-block;
+      background: #3b2060;
+      color: #c39bd3;
+      padding: 0.1rem 0.4rem;
+      border-radius: 3px;
+      font-size: 0.7rem;
+      margin-left: 0.3rem;
+    }
+    .undo-redo-controls { margin-left: 0.4rem; }
+    .undo-redo-controls button {
+      background: #1a2540;
+      border: 1px solid #333;
+      color: #a0b0d0;
+      border-radius: 3px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      padding: 0.1rem 0.35rem;
+      margin-left: 0.15rem;
+      transition: all 0.15s;
+    }
+    .undo-redo-controls button:hover:not(:disabled) { background: #233060; border-color: #533483; color: #e0e0e0; }
+    .undo-redo-controls button:disabled { opacity: 0.3; cursor: not-allowed; }
+    /* ── Chat switch proposal cards ──────────────────────── */
+    .switch-proposals { margin-top: 0.4rem; display: flex; flex-direction: column; gap: 0.3rem; }
+    .switch-card {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #1a2540;
+      border: 1px solid #333;
+      border-radius: 6px;
+      padding: 0.35rem 0.5rem;
+      font-size: 0.75rem;
+      transition: all 0.2s;
+    }
+    .switch-card-info { display: flex; flex-direction: column; gap: 0.1rem; flex: 1; min-width: 0; }
+    .switch-material { color: #e0e0e0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .switch-arrow { color: #a0b0d0; font-size: 0.7rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .switch-factor { color: #e9c46a; font-size: 0.65rem; }
+    .switch-card-actions { display: flex; gap: 0.25rem; flex-shrink: 0; margin-left: 0.4rem; }
+    .switch-accept {
+      background: #1b4332;
+      border: 1px solid #52b788;
+      color: #52b788;
+      border-radius: 4px;
+      cursor: pointer;
+      padding: 0.15rem 0.4rem;
+      font-size: 0.75rem;
+      font-weight: bold;
+      transition: all 0.15s;
+    }
+    .switch-accept:hover { background: #2d6a4f; }
+    .switch-reject {
+      background: transparent;
+      border: 1px solid #555;
+      color: #888;
+      border-radius: 4px;
+      cursor: pointer;
+      padding: 0.15rem 0.4rem;
+      font-size: 0.75rem;
+      transition: all 0.15s;
+    }
+    .switch-reject:hover { border-color: #e76f6f; color: #e76f6f; }
+    .switch-card-accepted { border-color: #52b788; background: rgba(82, 183, 136, 0.08); opacity: 0.7; }
+    .switch-card-rejected { border-color: #555; opacity: 0.4; }
+    .switch-status-text { font-size: 0.7rem; color: #888; font-style: italic; }
+
+    /* ── Chat panel (right side) ───────────────────────── */
+    #chat-panel {
+      width: 340px;
+      flex-shrink: 0;
+      background: #16213e;
+      border-left: 1px solid #0f3460;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .chat-header {
+      padding: 0.5rem 0.75rem;
+      background: #121f38;
+      border-bottom: 1px solid #0f3460;
+    }
+    .chat-header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .chat-header h2 { font-size: 0.85rem; font-weight: 600; }
+    #chat-settings-toggle {
+      background: none;
+      border: none;
+      color: #888;
+      cursor: pointer;
+      font-size: 1rem;
+      padding: 0.2rem;
+    }
+    #chat-settings-toggle:hover { color: #ddd; }
+
+    .chat-settings {
+      margin-top: 0.5rem;
+      padding: 0.5rem;
+      background: #1a2540;
+      border-radius: 4px;
+    }
+    .chat-settings.hidden { display: none; }
+    .settings-row {
+      display: flex;
+      gap: 0.4rem;
+      margin-bottom: 0.4rem;
+    }
+    .settings-row select,
+    .settings-row input {
+      flex: 1;
+      padding: 0.3rem 0.5rem;
+      background: #0f3460;
+      border: 1px solid #333;
+      border-radius: 3px;
+      color: #e0e0e0;
+      font-size: 0.75rem;
+    }
+    .settings-row button {
+      padding: 0.3rem 0.6rem;
+      background: #533483;
+      border: none;
+      border-radius: 3px;
+      color: #fff;
+      cursor: pointer;
+      font-size: 0.75rem;
+    }
+    .settings-row button:hover { background: #6a4aa5; }
+    .key-status { font-size: 0.7rem; margin-top: 0.2rem; }
+    .key-status-ok { color: #52b788; }
+    .key-status-warn { color: #e9c46a; }
+
+    /* Chat messages */
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0.5rem;
+    }
+    .chat-messages::-webkit-scrollbar { width: 6px; }
+    .chat-messages::-webkit-scrollbar-track { background: #16213e; }
+    .chat-messages::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+    .chat-empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: #555;
+      text-align: center;
+      padding: 1rem;
+    }
+    .chat-empty-icon { font-size: 2rem; margin-bottom: 0.5rem; opacity: 0.5; }
+    .chat-empty-state p { font-size: 0.8rem; }
+
+    .chat-msg {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.6rem;
+    }
+    .chat-msg-user { flex-direction: row-reverse; }
+    .msg-icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 0.75rem;
+    }
+    .msg-content {
+      padding: 0.4rem 0.6rem;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      line-height: 1.4;
+      max-width: 85%;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .chat-msg-user .msg-content {
+      background: #533483;
+      color: #f0f0f0;
+    }
+    .chat-msg-assistant .msg-content {
+      background: #1a2540;
+      color: #d0d0d0;
+    }
+
+    /* Suggested prompts */
+    .chat-suggested {
+      padding: 0.4rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+    }
+    .chat-suggested.hidden { display: none; }
+    .suggested-prompt {
+      background: #1a2540;
+      border: 1px solid #0f3460;
+      border-radius: 6px;
+      padding: 0.35rem 0.6rem;
+      color: #a0b0d0;
+      cursor: pointer;
+      font-size: 0.75rem;
+      text-align: left;
+      transition: background 0.15s;
+    }
+    .suggested-prompt:hover {
+      background: #233060;
+      border-color: #533483;
+      color: #e0e0e0;
+    }
+
+    /* Chat input */
+    .chat-input-area {
+      display: flex;
+      gap: 0.4rem;
+      padding: 0.5rem;
+      border-top: 1px solid #0f3460;
+      background: #121f38;
+    }
+    .chat-input-area textarea {
+      flex: 1;
+      padding: 0.4rem 0.6rem;
+      background: #1a2540;
+      border: 1px solid #333;
+      border-radius: 6px;
+      color: #e0e0e0;
+      font-family: inherit;
+      font-size: 0.8rem;
+      resize: none;
+      min-height: 32px;
+      max-height: 100px;
+    }
+    .chat-input-area textarea:focus {
+      outline: none;
+      border-color: #533483;
+    }
+    .chat-input-area textarea:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .chat-input-area button {
+      padding: 0.4rem 0.7rem;
+      background: #533483;
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      cursor: pointer;
+      font-size: 1rem;
+      font-weight: bold;
+      align-self: flex-end;
+    }
+    .chat-input-area button:hover:not(:disabled) { background: #6a4aa5; }
+    .chat-input-area button:disabled { opacity: 0.4; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>LCA Material Viewer</h1>
+      <input type="file" id="file-input" accept=".ifc" />
+      <span id="status">Load an IFC file to view materials</span>
+    </header>
+    <div id="main-content">
+      <div id="left-pane">
+        <div id="canvas-container">
+          <canvas id="viewer"></canvas>
+        </div>
+        <div id="panel-resize"></div>
+        <div id="material-panel">
+          <div id="panel-header">
+            <h2>Materials for LCA</h2>
+            <span id="panel-summary"></span>
+          </div>
+          <div id="material-list">
+            <div class="empty-state">Load an IFC file to see materials and volumes</div>
+          </div>
+        </div>
+      </div>
+      <div id="chat-panel"></div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
